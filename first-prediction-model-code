@@ -1,0 +1,89 @@
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+import tensorflow as tf
+
+
+# Load and preprocess the data
+data = pd.read_csv('glucose.csv')
+data['datetime'] = pd.to_datetime(data['datetime'])
+data.set_index('datetime', inplace=True)
+
+# Normalize the data
+scaler = MinMaxScaler()
+data['glucose'] = scaler.fit_transform(data[['glucose']])
+
+
+# Function to create sequences and targets
+def create_sequences(data, sequence_length, forecast_length):
+    sequences, targets = [], []
+    for i in range(len(data) - sequence_length - forecast_length + 1):
+        sequences.append(data[i:(i + sequence_length)].values)
+        targets.append(data[(i + sequence_length):(i + sequence_length + forecast_length)].values)
+    return np.array(sequences), np.array(targets)
+
+# Create sequences
+sequence_length = 12  # last 60 minutes
+forecast_length = 5   # next 30 minutes
+X, y = create_sequences(data['glucose'], sequence_length, forecast_length)
+print("X: " + str(X))
+print("y: " + str(y))
+# Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Define the LSTM model
+model = tf.keras.Sequential([
+    tf.keras.layers.LSTM(64, return_sequences=True, input_shape=(X_train.shape[1], 1)),
+    tf.keras.layers.LSTM(32, return_sequences=False),
+    tf.keras.layers.Dense(32, activation='relu'),
+    tf.keras.layers.Dense(y_train.shape[1])  # Output layer for predicting 5 future values
+])
+
+# Compile the model
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), loss='mse')
+
+# Train the model
+model.fit(X_train, y_train, epochs=100, batch_size=32, validation_split=0.2)
+
+# print the model summary
+model.summary()
+
+# make predictions on the test set
+predictions = model.predict(X_test)
+
+# Inverse transform the predictions and actual values
+predictions = scaler.inverse_transform(predictions)
+y_test = scaler.inverse_transform(y_test)
+
+# Calculate the mean squared error
+mse = np.mean((predictions - y_test) ** 2)
+print(f'Mean Squared Error: {mse}')
+
+# Save the model
+model.save('glucose_forecasting_model.h5')
+# Path: glucose.csv
+# id,glucose,datetime
+
+# I want to plot the glucose levels and the predictions
+import matplotlib.pyplot as plt
+
+# Plot the glucose levels
+plt.figure(figsize=(14, 7))
+plt.plot(data.index, data['glucose'], label='Glucose Levels', color='blue')
+plt.xlabel('Datetime')
+plt.ylabel('Glucose Level')
+plt.title('Glucose Levels Over Time')
+plt.legend()
+plt.show()
+
+# Plot the predictions
+plt.figure(figsize=(14, 7))
+plt.plot(data.index[-len(y_test):], y_test[:, 0], label='Actual Glucose Levels', color='blue')
+plt.plot(data.index[-len(y_test):], predictions[:, 0], label='Predicted Glucose Levels', color='red')
+plt.xlabel('Datetime')
+plt.ylabel('Glucose Level')
+plt.title('Actual vs Predicted Glucose Levels')
+plt.legend()
+plt.show()
+
